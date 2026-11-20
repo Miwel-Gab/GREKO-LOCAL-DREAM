@@ -1,6 +1,6 @@
 [versions]
-agp = "9.2.0"
-kotlin = "2.3.21"
+agp = "9.2.1"
+kotlin = "2.4.21"
 coreKtx = "1.16.0"
 junit = "4.13.2"
 junitVersion = "1.2.1"
@@ -20,7 +20,7 @@ coil-compose = "2.4.0"
 cropify = "0.5.1"
 room = "2.8.4"
 paging = "3.3.6"
-ksp = "2.3.8"
+ksp = "2.3.12"
 ktlint-gradle = "14.2.0"
 detekt = "1.23.7"
 
