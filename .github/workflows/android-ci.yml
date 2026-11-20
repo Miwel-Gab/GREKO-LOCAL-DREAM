@@ -48,7 +48,9 @@ jobs:
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --channel=3 --install "platforms;android-37.0" "platform-tools" "build-tools;37.0.0" "cmake;3.22.1" "ndk;27.2.12479018" "ninja"
+          sdkmanager --channel=3 --install "platforms;android-37.0" "platform-tools" "build-tools;37.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Download and verify Qualcomm AI Runtime SDK
