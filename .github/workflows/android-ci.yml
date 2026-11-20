@@ -23,7 +23,7 @@ jobs:
   build:
     name: Build and test Android variants
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout source and native submodules
         uses: actions/checkout@v4
@@ -39,9 +39,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          accept-android-sdk-licenses: true
 
       - name: Install Android build packages
         run: |
+          yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --install "platform-tools" "platforms;android-37" "build-tools;37.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
 
       - name: Set up Gradle
