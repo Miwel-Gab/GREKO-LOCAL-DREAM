@@ -71,6 +71,13 @@ jobs:
           test -f "$qnn_root/lib/aarch64-android/libQnnSystem.so"
           echo "QNN_SDK_ROOT=$qnn_root" >> "$GITHUB_ENV"
 
+      - name: Install Rust Android target
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-linux-android
+          rustc --print target-libdir --target aarch64-linux-android
+
       - name: Build native Stable Diffusion backend
         shell: bash
         run: |
