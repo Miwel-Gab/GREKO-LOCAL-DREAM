@@ -46,7 +46,10 @@ jobs:
       - name: Install Android build packages
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-36" "platform-tools" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+          sdkmanager --list --channel=3 | tee sdkmanager-packages.txt
+          grep -E "platforms;android-37([[:space:]]|$)" sdkmanager-packages.txt
+          grep -E "build-tools;37\.0\.0([[:space:]]|$)" sdkmanager-packages.txt
+          sdkmanager --channel=3 --install "platforms;android-37" "platform-tools" "build-tools;37.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
