@@ -78,6 +78,29 @@ jobs:
           rustup target add aarch64-linux-android
           rustc --print target-libdir --target aarch64-linux-android
 
+      - name: Apply Rust raw-pointer compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_file="app/src/main/cpp/3rdparty/tokenizers-cpp/rust/src/lib.rs"
+          python3 - "$source_file" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          replacements = {
+              "(*handle).decode_str.len()": "(&(*handle).decode_str).len()",
+              "(*handle).id_to_token_result.len()": "(&(*handle).id_to_token_result).len()",
+          }
+          for old, new in replacements.items():
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {old!r}, found {count}")
+              source = source.replace(old, new)
+          path.write_text(source)
+          PY
+
       - name: Build native Stable Diffusion backend
         shell: bash
         run: |
