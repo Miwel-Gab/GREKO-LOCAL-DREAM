@@ -23,7 +23,7 @@ jobs:
   build:
     name: Build and test Android variants
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout source and native submodules
         uses: actions/checkout@v4
@@ -44,12 +44,69 @@ jobs:
           accept-android-sdk-licenses: true
 
       - name: Install Android build packages
+        shell: bash
         run: |
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --list --channel=3 | tee sdkmanager-packages.txt
-          grep -E "platforms;android-37\.0([[:space:]]|$)" sdkmanager-packages.txt
-          grep -E "build-tools;37\.0\.0([[:space:]]|$)" sdkmanager-packages.txt
           sdkmanager --channel=3 --install "platforms;android-37.0" "platform-tools" "build-tools;37.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Download and verify Qualcomm AI Runtime SDK
+        shell: bash
+        env:
+          QNN_SDK_URL: https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.51.0.260929/v2.51.0.260929.zip
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/qnn-2.51.0.260929.zip"
+          sdk_dir="$RUNNER_TEMP/qnn-sdk"
+          mkdir -p "$sdk_dir"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$QNN_SDK_URL" -o "$archive"
+          unzip -t "$archive"
+          unzip -q "$archive" -d "$sdk_dir"
+          qnn_root="$sdk_dir/qairt/2.51.0.260929"
+          test -d "$qnn_root/examples/QNN/SampleApp/SampleApp"
+          test -f "$qnn_root/lib/aarch64-android/libQnnHtp.so"
+          test -f "$qnn_root/lib/aarch64-android/libQnnSystem.so"
+          echo "QNN_SDK_ROOT=$qnn_root" >> "$GITHUB_ENV"
+
+      - name: Install Rust Android target
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-linux-android
+          rustc --print target-libdir --target aarch64-linux-android
+
+      - name: Apply Rust raw-pointer compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_file="app/src/main/cpp/3rdparty/tokenizers-cpp/rust/src/lib.rs"
+          python3 - "$source_file" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          replacements = {
+              "(*handle).decode_str.len()": "(&(*handle).decode_str).len()",
+              "(*handle).id_to_token_result.len()": "(&(*handle).id_to_token_result).len()",
+          }
+          for old, new in replacements.items():
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {old!r}, found {count}")
+              source = source.replace(old, new)
+          path.write_text(source)
+          PY
+
+      - name: Build native Stable Diffusion backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd app/src/main/cpp
+          bash build.sh
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -62,12 +119,18 @@ jobs:
       - name: Run unit tests and assemble APKs
         run: ./gradlew --no-daemon --stacktrace testBasicDebugUnitTest assembleBasicDebug assembleFilterDebug
 
-      - name: Verify APK outputs
+      - name: Verify APK outputs and native backend
         shell: bash
         run: |
           set -euo pipefail
-          find app/build/outputs/apk -type f -name '*.apk' -print
-          test "$(find app/build/outputs/apk -type f -name '*.apk' | wc -l)" -ge 2
+          mapfile -t apks < <(find app/build/outputs/apk -type f -name '*.apk' | sort)
+          test "${#apks[@]}" -ge 2
+          for apk in "${apks[@]}"; do
+            echo "Checking native backend in: $apk"
+            unzip -Z1 "$apk" | grep -Fx 'lib/arm64-v8a/libstable_diffusion_core.so'
+            unzip -Z1 "$apk" | grep -Eq '^assets/qnnlibs/libQnnHtp.*\.so$'
+            unzip -Z1 "$apk" | grep -Fx 'assets/qnnlibs/libQnnSystem.so'
+          done
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4

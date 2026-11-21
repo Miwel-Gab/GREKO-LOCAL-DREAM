@@ -1891,7 +1891,12 @@ fun ModelRunScreen(
                 },
                 onUnhealthy = {
                     isCheckingBackend = false
-                    errorMessage = msgBackendFailed
+                    val backendError = BackendService.backendState.value as? BackendService.BackendState.Error
+                    errorMessage = backendError
+                        ?.takeIf { it.modelId == null || it.modelId == modelId }
+                        ?.message
+                        ?.let { "$msgBackendFailed: $it" }
+                        ?: msgBackendFailed
                 },
             )
         }

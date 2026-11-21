@@ -302,13 +302,26 @@ class BackendService : Service() {
             return
         }
         if (startBackend(want)) {
-            serving = want
-            updateServing(want)
-            updateState(BackendState.Running)
+            if (process?.isAlive == true) {
+                serving = want
+                updateServing(want)
+                updateState(BackendState.Running)
+            } else {
+                serving = null
+                updateServing(null)
+                // The monitor may have reported the native process' startup
+                // failure before startBackend() returned. Never overwrite that
+                // diagnostic with a false Running state.
+                if (backendState.value !is BackendState.Error) {
+                    updateState(BackendState.Error("Backend exited during startup", want.modelId))
+                }
+            }
         } else {
             serving = null
             updateServing(null)
-            updateState(BackendState.Error("Backend start failed", want.modelId))
+            if (backendState.value !is BackendState.Error) {
+                updateState(BackendState.Error("Backend start failed", want.modelId))
+            }
         }
     }
 
@@ -663,7 +676,7 @@ class BackendService : Service() {
             val proc = processBuilder.start()
             process = proc
 
-            startMonitorThread(proc)
+            startMonitorThread(proc, modelId)
 
             return true
         } catch (e: Exception) {
@@ -673,34 +686,44 @@ class BackendService : Service() {
         }
     }
 
-    private fun startMonitorThread(proc: Process) {
+    private fun startMonitorThread(proc: Process, modelId: String) {
         Thread {
+            val outputTail = ArrayDeque<String>()
             val exitCode = try {
                 proc.inputStream.bufferedReader().use { reader ->
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
-                        Log.i(TAG, "Backend: $line")
+                        val outputLine = line.orEmpty()
+                        Log.i(TAG, "Backend: $outputLine")
+                        if (outputLine.isNotBlank()) {
+                            outputTail.addLast(outputLine)
+                            while (outputTail.size > 20) outputTail.removeFirst()
+                        }
                     }
                 }
                 proc.waitFor()
             } catch (e: Exception) {
                 Log.e(TAG, "monitor error", e)
                 if (isLiveCrash(proc)) {
-                    updateState(BackendState.Error("monitor error: ${e.message}", servingModelId.value))
+                    updateState(BackendState.Error("monitor error: ${e.message}", modelId))
                 }
                 return@Thread
             }
             Log.i(TAG, "Backend process exited with code: $exitCode")
-            // Only surface as an error when this is still the active process and
-            // we didn't intentionally stop it; a torn-down or superseded process
-            // exiting is expected and must not poison the shared backendState.
+            // Preserve the native program's final output so startup failures can
+            // be diagnosed on-device instead of collapsing into a localhost
+            // connection error.
             if (isLiveCrash(proc)) {
-                updateState(
-                    BackendState.Error(
-                        "Backend process exited with code: $exitCode",
-                        servingModelId.value,
-                    ),
-                )
+                val detail = outputTail.joinToString("\n").takeLast(1800)
+                val message = buildString {
+                    append("Backend process exited with code: ")
+                    append(exitCode)
+                    if (detail.isNotBlank()) {
+                        append("\n")
+                        append(detail)
+                    }
+                }
+                updateState(BackendState.Error(message, modelId))
             } else {
                 Log.i(TAG, "backend exit ($exitCode) was intentional/stale, not reporting")
             }
